@@ -1,3 +1,5 @@
+> Developed in the novo-lang monorepo under `orbit/rand-nv`, which is the source of truth until this package graduates out of it.  This repository is a mirror: it is where CI runs and where releases are tagged, and changes are made upstream.
+
 # rand-nv
 
 Random numbers from two sources, kept apart on purpose. The operating
