@@ -44,7 +44,6 @@
 // hardware entropy peripheral instead — `Rng` itself is arithmetic on
 // `Int` and needs neither a heap nor an operating system.
 
-use std.bits
 use std.bytes
 use std.fs
 use std.int
@@ -198,12 +197,12 @@ impl Rng
         // one state word, and the state advances independently, so a
         // weakness in either does not reach the other.
         let result = int.wrapping_mul(rotl(int.wrapping_mul(self.s1, 5), 7), 9)
-        let t = bits.shl(self.s1, 17)
-        self.s2 = bits.xor(self.s2, self.s0)
-        self.s3 = bits.xor(self.s3, self.s1)
-        self.s1 = bits.xor(self.s1, self.s2)
-        self.s0 = bits.xor(self.s0, self.s3)
-        self.s2 = bits.xor(self.s2, t)
+        let t = self.s1 << 17
+        self.s2 ^= self.s0
+        self.s3 ^= self.s1
+        self.s1 ^= self.s2
+        self.s0 ^= self.s3
+        self.s2 ^= t
         self.s3 = rotl(self.s3, 45)
         result
 
@@ -243,8 +242,8 @@ impl Rng
         if remaining > 0
             var word = self.u64()
             for _i in 0 .. remaining
-                dst.put_u8(bits.band(word, 0xff))
-                word = bits.shr(word, 8)
+                dst.put_u8(word & 0xff)
+                word >>>= 8
 
     // `n` random bytes as a fresh buffer.
     fn bytes(mut self, n: Int) -> Bytes
@@ -258,12 +257,16 @@ impl Rng
 // with `bits.rotate_left`, which the interpreter does not implement, so
 // that both legs execute this source.
 fn rotl(x: Int, k: Int) -> Int
-    bits.bor(bits.shl(x, k), bits.shr(x, 64 - k))
+    // The count is named because the shifts bind looser than `-`, so
+    // the inline form would read as a shift by 64 followed by a
+    // subtraction.
+    let back = 64 - k
+    (x << k) | (x >>> back)
 
 // The bit pattern of `v` with the top bit dropped: a non-negative `Int`
 // carrying 63 random bits.
 fn positive_of(v: Int) -> Int
-    bits.shr(v, 1)
+    v >>> 1
 
 // The last whole multiple of `span` a 63-bit draw can reach.  Both
 // `range` functions discard a draw at or above it and take another.
@@ -274,7 +277,9 @@ fn positive_of(v: Int) -> Int
 // expected `span / 2^63` extra draws, which is nothing for any span a
 // caller actually asks for.
 fn tail_free_ceiling(span: Int) -> Int
-    bits.shr(0 - 1, 1) / span * span
+    let all_ones = 0 - 1
+    let largest_draw = all_ones >>> 1
+    largest_draw / span * span
 
 // splitmix64's three constants, each assembled from its two halves.
 //
@@ -299,7 +304,7 @@ fn second_multiplier() -> Int
 
 // A 64-bit constant from its high and low 32-bit halves.
 fn joined(high: Int, low: Int) -> Int
-    bits.bor(bits.shl(high, 32), low)
+    (high << 32) | low
 
 // One step of splitmix64's state: the seeding routine's odd increment,
 // chosen so that every seed reaches a different part of the sequence.
@@ -310,6 +315,6 @@ fn split_step(state: Int) -> Int
 // rounds, which is what spreads one set bit across all 64.
 fn split_value(state: Int) -> Int
     var z = state
-    z = int.wrapping_mul(bits.xor(z, bits.shr(z, 30)), first_multiplier())
-    z = int.wrapping_mul(bits.xor(z, bits.shr(z, 27)), second_multiplier())
-    bits.xor(z, bits.shr(z, 31))
+    z = int.wrapping_mul(z ^ (z >>> 30), first_multiplier())
+    z = int.wrapping_mul(z ^ (z >>> 27), second_multiplier())
+    z ^ (z >>> 31)

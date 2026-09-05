@@ -87,7 +87,7 @@ fn test_every_bit_of_the_output_moves() [io]
     for _d in 0 .. 200
         let v = r.u64()
         for b in 0 .. 64
-            if bits.band(bits.shr(v, b), 1) == 1
+            if ((v >>> b) & 1) == 1
                 ones = bytes.set_u8(ones, b, 1)
             else
                 zeros = bytes.set_u8(zeros, b, 1)
@@ -222,6 +222,6 @@ fn test_os_u64_answers_a_full_width_value() [io, fs, rand]
         match rng.os_u64()
             None    => test.fail("a draw from the device failed")
             Some(v) =>
-                if bits.shr(v, 32) != 0
+                if (v >>> 32) != 0
                     wide = wide + 1
     test.assert_true(wide > 0, "every draw fitted 32 bits")

@@ -1,6 +1,6 @@
 [package]
 name        = "rand-nv"
-version     = "0.1.0"
+version     = "0.1.1"
 description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
 license     = "Apache-2.0"
 stability   = "experimental"
@@ -16,5 +16,6 @@ main        = "src/main.nv"
 "README.md" = "Drawing random numbers, securely or reproducibly"
 
 [dependencies]
-# None.  std.fs opens the operating system's device, std.bits and
-# std.int supply the arithmetic, std.bytes the buffer and the cursor.
+# None.  std.fs opens the operating system's device, std.int supplies
+# the wrapping multiply, std.bytes the buffer and the cursor; the shifts
+# and xors are operators.
