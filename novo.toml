@@ -4,7 +4,10 @@ version     = "0.1.0"
 description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
 license     = "Apache-2.0"
 stability   = "experimental"
-keywords    = ["random", "csprng", "xoshiro", "urandom", "seed"]
+category    = "crypto"
+tags        = ["random", "csprng", "xoshiro", "urandom", "seed"]
+repository  = "https://github.com/novolang/rand-nv"
+maintainers = ["novo-lang"]
 main        = "src/main.nv"
 
 # The README is the package's one page, and its own first heading is the

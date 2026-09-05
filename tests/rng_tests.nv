@@ -2,7 +2,7 @@
 // have, and the operating system source actually answering.
 //
 // Run from the package directory:
-//   novo test src/rng_tests.nv
+//   novo test tests/rng_tests.nv
 //
 // A generator cannot be tested by asserting that its numbers look
 // random — that is what a test suite is worst at.  What is asserted

@@ -128,7 +128,7 @@ number matters to someone else, use the first column.
 ## Tests
 
 ```
-novo test src/rng_tests.nv
+novo test tests/rng_tests.nv
 ```
 
 The external vector is splitmix64's published first output for seed 0,
