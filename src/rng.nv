@@ -1,0 +1,315 @@
+// Random numbers — the operating system's CSPRNG for anything that
+// matters, and a seedable generator for anything that has to repeat.
+//
+// What it is.  Two sources, kept apart on purpose.
+//
+//   `OsRandom` reads the operating system's cryptographically secure
+//   generator.  Its output is unpredictable, it cannot be seeded, and
+//   it is the only thing here fit for a key, a token, a nonce or a
+//   password salt.  Every call can fail, because it is a file.
+//
+//   `Rng` is xoshiro256**, a small, fast, well-distributed generator
+//   that is NOT cryptographically secure: from a handful of outputs an
+//   observer can compute the rest of the stream.  It exists because a
+//   test, a simulation and a shuffled fixture all want the same numbers
+//   twice, which is exactly what a secure generator refuses to give.
+//
+// Choosing between them is one question — does anyone gain anything by
+// predicting this number?  If yes, `OsRandom`.  If no, `Rng`, seeded
+// from a constant so a failure can be reproduced.
+//
+// What it does.  `u64`, `range(lo, hi)`, `fill(dst, n)` and `bytes(n)`
+// on both, with the same meanings, so switching source changes the
+// construction and nothing else.
+//
+// How to use it.
+//
+//     // A token nobody can guess.
+//     let token = rng.os_bytes(32)
+//
+//     // A run that can be replayed.
+//     var r = rng.seeded(20260905)
+//     let roll = r.range(1, 7)
+//
+// What it costs.  `Rng` is five xors, two shifts, two rotates and two
+// multiplies per 64-bit draw, with no allocation and no syscall; a
+// `fill` spends one draw per eight bytes.  `OsRandom` is a `read` on an
+// open file per call — hold the handle when drawing repeatedly rather
+// than calling the one-shot forms in a loop, which open and close the
+// device each time.
+//
+// HOST ONLY.  The operating system source is `/dev/urandom`, so
+// `OsRandom` works where that file does: Linux, macOS and the BSDs.  A
+// microcontroller has no such file and should seed `Rng` from a
+// hardware entropy peripheral instead — `Rng` itself is arithmetic on
+// `Int` and needs neither a heap nor an operating system.
+
+use std.bits
+use std.bytes
+use std.fs
+use std.int
+use std.list
+
+// The operating system's CSPRNG, as a file.  This is the host door, and
+// the reason this half of the module is host-only.
+fn device_path() -> Str
+    "/dev/urandom"
+
+// How many bytes one 64-bit draw supplies.
+fn word_bytes() -> Int
+    8
+
+// ── The operating system's generator ─────────────────────────────────
+
+// An open handle on the operating system's CSPRNG.  Holding one turns a
+// draw into a single `read`; the one-shot functions below open and close
+// the device per call, which is right for a token and wrong for a loop.
+pub struct OsRandom
+    fd: Int
+
+// Open the operating system's generator, or `None` where there is no
+// such device — which is every target without a `/dev/urandom`.
+pub fn os_open() -> ?OsRandom [fs, rand]
+    match fs.open_read(device_path())
+        None     => None
+        Some(fd) => Some(OsRandom { fd: fd })
+
+impl OsRandom
+    // `n` random bytes, or `None` if the device would not supply them.
+    fn bytes(self, n: Int) -> ?Bytes [fs, rand]
+        if n <= 0
+            Some(bytes.zeros(0))
+        else
+            // The offset is ignored by a character device, which is
+            // what `/dev/urandom` is: every read draws fresh bytes.
+            match fs.read_at(self.fd, 0, n)
+                None     => None
+                Some(bs) =>
+                    if list.len(bs) == n
+                        Some(bytes.from_byte_list(bs))
+                    else
+                        None
+
+    // `n` random bytes at the cursor.  False when the device would not
+    // supply them, in which case nothing was written.
+    fn fill(self, mut dst: Cursor, n: Int) -> Bool [fs, rand]
+        match self.bytes(n)
+            None    => false
+            Some(b) =>
+                dst.put_bytes(b)
+                true
+
+    // One 64-bit draw, as the bit pattern of an unsigned value.
+    fn u64(self) -> ?Int [fs, rand]
+        match self.bytes(word_bytes())
+            None    => None
+            Some(b) => bytes.u64_be_at(b, 0)
+
+    // A value in `[lo, hi)`, uniform — no modulo bias.  `lo` when the
+    // range is empty, matching `Rng.range`; `None` when the device
+    // stopped answering.
+    fn range(self, lo: Int, hi: Int) -> ?Int [fs, rand]
+        if hi <= lo
+            Some(lo)
+        else
+            let span = hi - lo
+            let ceiling = tail_free_ceiling(span)
+            var answer: ?Int = None
+            var drawing = true
+            while drawing
+                match self.u64()
+                    None    =>
+                        drawing = false
+                    Some(v) =>
+                        let d = positive_of(v)
+                        // A draw in the ragged tail above the last whole
+                        // multiple of `span` is discarded, not folded.
+                        if d < ceiling
+                            answer = Some(lo + d % span)
+                            drawing = false
+            answer
+
+    // Give the device back.  A handle that outlives its use holds a file
+    // descriptor, and a process has a finite number of those.
+    fn close(self) [fs]
+        fs.close(self.fd)
+
+// `n` random bytes from the operating system, opening and closing the
+// device around the read.  The form for a token or a salt drawn once; a
+// caller drawing repeatedly should hold an `OsRandom`.
+pub fn os_bytes(n: Int) -> ?Bytes [fs, rand]
+    match os_open()
+        None    => None
+        Some(o) =>
+            let drawn = o.bytes(n)
+            o.close()
+            drawn
+
+// One 64-bit draw from the operating system, opening and closing the
+// device around the read.
+pub fn os_u64() -> ?Int [fs, rand]
+    match os_bytes(word_bytes())
+        None    => None
+        Some(b) => bytes.u64_be_at(b, 0)
+
+// ── The reproducible generator ───────────────────────────────────────
+
+// xoshiro256**, whose whole state is these four words.  Not
+// cryptographically secure: an observer who has seen a few outputs can
+// compute the rest.  Seed it from a constant to replay a run, or from
+// `from_os` when the stream should differ per process but need not be
+// unguessable.
+pub struct Rng
+    var s0: Int
+    var s1: Int
+    var s2: Int
+    var s3: Int
+
+// A generator whose stream is fixed by `seed`.  The same seed gives the
+// same numbers on every machine and every backend, which is the whole
+// point of having this beside the operating system's generator.
+pub fn seeded(seed: Int) -> Rng
+    // splitmix64, the seeding routine xoshiro's authors specify.  It is
+    // here rather than "put the seed in s0" because the state must not
+    // start nearly empty: a state of a single set bit takes a long run
+    // to diffuse, so `seeded(1)` and `seeded(2)` would otherwise open
+    // with almost the same numbers.
+    let a = split_step(seed)
+    let b = split_step(a)
+    let c = split_step(b)
+    let d = split_step(c)
+    Rng { s0: split_value(a), s1: split_value(b),
+          s2: split_value(c), s3: split_value(d) }
+
+// A generator seeded from the operating system, so its stream differs
+// per process.  Still not cryptographically secure — the seed is
+// unguessable and the stream that follows is not.
+pub fn from_os() -> ?Rng [fs, rand]
+    match os_u64()
+        None    => None
+        Some(v) => Some(seeded(v))
+
+impl Rng
+    // The next 64-bit draw, as the bit pattern of an unsigned value —
+    // so half the outputs are negative `Int`s, and that is the value
+    // rather than a fault.
+    fn u64(mut self) -> Int
+        // The "**" of xoshiro256**: the output is a scrambled view of
+        // one state word, and the state advances independently, so a
+        // weakness in either does not reach the other.
+        let result = int.wrapping_mul(rotl(int.wrapping_mul(self.s1, 5), 7), 9)
+        let t = bits.shl(self.s1, 17)
+        self.s2 = bits.xor(self.s2, self.s0)
+        self.s3 = bits.xor(self.s3, self.s1)
+        self.s1 = bits.xor(self.s1, self.s2)
+        self.s0 = bits.xor(self.s0, self.s3)
+        self.s2 = bits.xor(self.s2, t)
+        self.s3 = rotl(self.s3, 45)
+        result
+
+    // A non-negative draw, the top bit dropped.  Everything that counts
+    // or indexes goes through this, so the arithmetic below is ordinary
+    // arithmetic on a signed `Int` rather than unsigned arithmetic
+    // wearing one.
+    fn positive(mut self) -> Int
+        positive_of(self.u64())
+
+    // A value in `[lo, hi)`, uniform.  `lo` when the range is empty, so
+    // a caller that computed an empty range gets a value rather than a
+    // panic; `hi - lo` must fit an `Int`.
+    fn range(mut self, lo: Int, hi: Int) -> Int
+        if hi <= lo
+            lo
+        else
+            let span = hi - lo
+            let ceiling = tail_free_ceiling(span)
+            var d = self.positive()
+            // A draw in the ragged tail above the last whole multiple of
+            // `span` is discarded, not folded.
+            while d >= ceiling
+                d = self.positive()
+            lo + d % span
+
+    // `n` random bytes at the cursor.  Writes into the caller's buffer
+    // and allocates nothing.
+    fn fill(mut self, mut dst: Cursor, n: Int)
+        var remaining = n
+        while remaining >= word_bytes()
+            dst.put_u64(self.u64())
+            remaining = remaining - word_bytes()
+        // The tail takes the low bytes of one more draw; the rest of
+        // that draw is discarded rather than carried, so a `fill` never
+        // depends on how the previous one ended.
+        if remaining > 0
+            var word = self.u64()
+            for _i in 0 .. remaining
+                dst.put_u8(bits.band(word, 0xff))
+                word = bits.shr(word, 8)
+
+    // `n` random bytes as a fresh buffer.
+    fn bytes(mut self, n: Int) -> Bytes
+        var c = bytes.cursor_be(bytes.zeros(n))
+        self.fill(c, n)
+        c.finish()
+
+// ── The arithmetic, on `Int` alone ───────────────────────────────────
+
+// `x` rotated left by `k` bits.  Written from the shifts rather than
+// with `bits.rotate_left`, which the interpreter does not implement, so
+// that both legs execute this source.
+fn rotl(x: Int, k: Int) -> Int
+    bits.bor(bits.shl(x, k), bits.shr(x, 64 - k))
+
+// The bit pattern of `v` with the top bit dropped: a non-negative `Int`
+// carrying 63 random bits.
+fn positive_of(v: Int) -> Int
+    bits.shr(v, 1)
+
+// The last whole multiple of `span` a 63-bit draw can reach.  Both
+// `range` functions discard a draw at or above it and take another.
+//
+// A plain `draw % span` favours the low residues whenever `span` does
+// not divide the draw's range — invisible for a die, total for a span
+// near the top of the range.  Discarding the tail instead costs an
+// expected `span / 2^63` extra draws, which is nothing for any span a
+// caller actually asks for.
+fn tail_free_ceiling(span: Int) -> Int
+    bits.shr(0 - 1, 1) / span * span
+
+// splitmix64's three constants, each assembled from its two halves.
+//
+// Written this way rather than as one literal because all three are
+// above 2^63, where an `Int` literal has to be spelled as the negative
+// decimal with that bit pattern — and the whole value of these numbers
+// is that a reader can compare them against the ones the algorithm
+// publishes, which are always given in hex.
+
+// The increment: `0x9e3779b97f4a7c15`, the golden ratio's fractional
+// part scaled to 64 bits.  Odd, so stepping by it visits every state.
+fn golden_gamma() -> Int
+    joined(0x9e3779b9, 0x7f4a7c15)
+
+// The first mixing multiplier, `0xbf58476d1ce4e5b9`.
+fn first_multiplier() -> Int
+    joined(0xbf58476d, 0x1ce4e5b9)
+
+// The second mixing multiplier, `0x94d049bb133111eb`.
+fn second_multiplier() -> Int
+    joined(0x94d049bb, 0x133111eb)
+
+// A 64-bit constant from its high and low 32-bit halves.
+fn joined(high: Int, low: Int) -> Int
+    bits.bor(bits.shl(high, 32), low)
+
+// One step of splitmix64's state: the seeding routine's odd increment,
+// chosen so that every seed reaches a different part of the sequence.
+fn split_step(state: Int) -> Int
+    int.wrapping_add(state, golden_gamma())
+
+// The value splitmix64 produces from a state — two multiply-xor-shift
+// rounds, which is what spreads one set bit across all 64.
+fn split_value(state: Int) -> Int
+    var z = state
+    z = int.wrapping_mul(bits.xor(z, bits.shr(z, 30)), first_multiplier())
+    z = int.wrapping_mul(bits.xor(z, bits.shr(z, 27)), second_multiplier())
+    bits.xor(z, bits.shr(z, 31))

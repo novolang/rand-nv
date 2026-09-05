@@ -1,0 +1,17 @@
+[package]
+name        = "rand-nv"
+version     = "0.1.0"
+description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
+license     = "Apache-2.0"
+stability   = "experimental"
+keywords    = ["random", "csprng", "xoshiro", "urandom", "seed"]
+main        = "src/main.nv"
+
+# The README is the package's one page, and its own first heading is the
+# package name — which says nothing in a list of this package's pages.
+[docs.pages]
+"README.md" = "Drawing random numbers, securely or reproducibly"
+
+[dependencies]
+# None.  std.fs opens the operating system's device, std.bits and
+# std.int supply the arithmetic, std.bytes the buffer and the cursor.

@@ -1,0 +1,227 @@
+// rng_tests.nv — the seeding vector, the properties a generator has to
+// have, and the operating system source actually answering.
+//
+// Run from the package directory:
+//   novo test src/rng_tests.nv
+//
+// A generator cannot be tested by asserting that its numbers look
+// random — that is what a test suite is worst at.  What is asserted
+// here is what a caller relies on: the same seed replays exactly, two
+// seeds do not, `range` never leaves its bounds and covers them, `fill`
+// writes what it was asked for, and the operating system's device is
+// there and gives different bytes each time.
+//
+// The one external vector is splitmix64's first output for seed 0,
+// which is what pins the seeding routine to the one xoshiro's authors
+// specify rather than to this file's idea of it.
+
+use std.bytes
+use std.list
+use std.test
+use rng
+
+// The first `n` draws of a generator seeded with `seed`.  A loop rather
+// than a `list.map` because each element comes from advancing the
+// generator, so the order of the calls is the meaning.
+fn stream(seed: Int, n: Int) -> [Int]
+    var r = rng.seeded(seed)
+    var out: [Int] = []
+    for _i in 0 .. n
+        let draw = r.u64()
+        out = list.push(out, draw)
+    out
+
+@test
+fn test_the_splitmix64_seeding_vector() [io]
+    // splitmix64 from state 0 produces 0xe220a8397b1dcdaf first, and
+    // that value is what `seeded(0)` puts in `s0`.  It is the published
+    // number for the routine, so it pins the seeding to the standard
+    // one rather than to this implementation.
+    let expected = 0 - 2152535657050944081
+    test.assert_eq(rng.seeded(0).s0, expected)
+    test.assert_eq_str(bytes.to_hex(bytes.u64_be(expected)), "e220a8397b1dcdaf")
+
+@test
+fn test_the_seed_spreads_across_the_whole_state() [io]
+    // The reason `seeded` runs splitmix64 rather than storing the seed:
+    // no state word may be left empty or equal to another, or the
+    // generator opens with a visibly poor stream.
+    let r = rng.seeded(0)
+    test.assert_ne(r.s0, 0)
+    test.assert_ne(r.s1, 0)
+    test.assert_ne(r.s2, 0)
+    test.assert_ne(r.s3, 0)
+    test.assert_ne(r.s0, r.s1)
+    test.assert_ne(r.s1, r.s2)
+    test.assert_ne(r.s2, r.s3)
+
+@test
+fn test_the_same_seed_replays_exactly() [io]
+    // The property the whole seedable half exists for.
+    let a = stream(20260905, 64)
+    let b = stream(20260905, 64)
+    for i in 0 .. 64
+        test.case("draw ${i}")
+        test.assert_eq(a[i], b[i])
+
+@test
+fn test_neighbouring_seeds_produce_unrelated_streams() [io]
+    // Seeds that differ by one must not produce streams that differ by
+    // one — that is exactly what a state seeded without splitmix64 does.
+    let a = stream(1, 32)
+    let b = stream(2, 32)
+    var same = 0
+    for i in 0 .. 32
+        if a[i] == b[i]
+            same = same + 1
+    test.assert_eq(same, 0)
+
+@test
+fn test_every_bit_of_the_output_moves() [io]
+    // Over enough draws each of the 64 output bits must have been seen
+    // both set and clear.  A generator whose high bits never move looks
+    // fine until someone shifts right.
+    var r = rng.seeded(7)
+    var ones = bytes.zeros(64)
+    var zeros = bytes.zeros(64)
+    for _d in 0 .. 200
+        let v = r.u64()
+        for b in 0 .. 64
+            if bits.band(bits.shr(v, b), 1) == 1
+                ones = bytes.set_u8(ones, b, 1)
+            else
+                zeros = bytes.set_u8(zeros, b, 1)
+    for b in 0 .. 64
+        test.case("bit ${b}")
+        test.assert_eq(bytes.byte_at(ones, b) ?? 0, 1)
+        test.assert_eq(bytes.byte_at(zeros, b) ?? 0, 1)
+
+@test
+fn test_range_stays_inside_its_bounds() [io]
+    var r = rng.seeded(11)
+    for _i in 0 .. 500
+        let v = r.range(10, 20)
+        test.assert_true(v >= 10, "range went below its low bound")
+        test.assert_true(v < 20, "range reached its high bound")
+
+@test
+fn test_range_reaches_every_value_it_should() [io]
+    // A die that never rolls a six is a bug a bounds check would miss.
+    var r = rng.seeded(13)
+    var seen = bytes.zeros(6)
+    for _i in 0 .. 400
+        seen = bytes.set_u8(seen, r.range(0, 6), 1)
+    for face in 0 .. 6
+        test.case("face ${face}")
+        test.assert_eq(bytes.byte_at(seen, face) ?? 0, 1)
+
+@test
+fn test_an_empty_or_reversed_range_answers_its_low_bound() [io]
+    // A caller that computed an empty range gets a value rather than a
+    // panic, which keeps the failure where the range was computed.
+    var r = rng.seeded(17)
+    test.assert_eq(r.range(5, 5), 5)
+    test.assert_eq(r.range(9, 4), 9)
+
+@test
+fn test_a_span_of_one_is_a_constant() [io]
+    var r = rng.seeded(19)
+    for _i in 0 .. 20
+        test.assert_eq(r.range(3, 4), 3)
+
+@test
+fn test_fill_writes_exactly_what_it_was_asked_for() [io]
+    // Including the tail that is not a whole 8-byte draw.
+    for n in 0 .. 40
+        test.case("length ${n}")
+        var r = rng.seeded(23)
+        var c = bytes.cursor_be(bytes.zeros(n + 4))
+        r.fill(c, n)
+        test.assert_eq(c.pos(), n)
+        // The four bytes past the end must be untouched.
+        let buf = c.finish()
+        for extra in n .. n + 4
+            test.assert_eq(bytes.byte_at(buf, extra) ?? 1, 0)
+
+@test
+fn test_fill_and_bytes_agree() [io]
+    var a = rng.seeded(29)
+    var b = rng.seeded(29)
+    var c = bytes.cursor_be(bytes.zeros(37))
+    a.fill(c, 37)
+    test.assert_eq_str(bytes.to_hex(c.finish()), bytes.to_hex(b.bytes(37)))
+
+@test
+fn test_the_operating_system_source_answers() [io, fs, rand]
+    match rng.os_bytes(32)
+        None    => test.fail("the operating system's generator was not there")
+        Some(b) => test.assert_eq(bytes.len(b), 32)
+
+@test
+fn test_two_draws_from_the_operating_system_differ() [io, fs, rand]
+    // Two 32-byte draws colliding by chance is a 1-in-2^256 event, so a
+    // failure here means the device was not read at all.
+    match rng.os_bytes(32)
+        None        => test.fail("the operating system's generator was not there")
+        Some(first) =>
+            match rng.os_bytes(32)
+                None         => test.fail("the second draw failed")
+                Some(second) => test.assert_ne(bytes.to_hex(first), bytes.to_hex(second))
+
+@test
+fn test_an_open_handle_draws_repeatedly() [io, fs, rand]
+    match rng.os_open()
+        None    => test.fail("the operating system's generator would not open")
+        Some(o) =>
+            var c = bytes.cursor_be(bytes.zeros(48))
+            test.assert_eq(o.fill(c, 16), true)
+            test.assert_eq(o.fill(c, 16), true)
+            test.assert_eq(o.fill(c, 16), true)
+            test.assert_eq(c.pos(), 48)
+            let drawn = c.finish()
+            // Three 16-byte draws that all matched would mean one read
+            // was repeated rather than three taken.
+            test.assert_ne(bytes.to_hex(bytes.slice(drawn, 0, 16)),
+                           bytes.to_hex(bytes.slice(drawn, 16, 32)))
+            test.assert_ne(bytes.to_hex(bytes.slice(drawn, 16, 32)),
+                           bytes.to_hex(bytes.slice(drawn, 32, 48)))
+            o.close()
+
+@test
+fn test_the_operating_system_range_stays_inside_its_bounds() [io, fs, rand]
+    match rng.os_open()
+        None    => test.fail("the operating system's generator would not open")
+        Some(o) =>
+            for _i in 0 .. 50
+                match o.range(100, 110)
+                    None    => test.fail("a draw from the device failed")
+                    Some(v) =>
+                        test.assert_true(v >= 100, "range went below its low bound")
+                        test.assert_true(v < 110, "range reached its high bound")
+            o.close()
+
+@test
+fn test_seeding_from_the_operating_system_gives_a_working_generator() [io, fs, rand]
+    match rng.from_os()
+        None    => test.fail("the operating system's generator was not there")
+        Some(r) =>
+            var g = r
+            var distinct = 0
+            let first = g.u64()
+            for _i in 0 .. 8
+                if g.u64() != first
+                    distinct = distinct + 1
+            test.assert_eq(distinct, 8)
+
+@test
+fn test_os_u64_answers_a_full_width_value() [io, fs, rand]
+    // Sixteen draws that all landed in the low 32 bits would mean the
+    // read was short and the top half left as zero.
+    var wide = 0
+    for _i in 0 .. 16
+        match rng.os_u64()
+            None    => test.fail("a draw from the device failed")
+            Some(v) =>
+                if bits.shr(v, 32) != 0
+                    wide = wide + 1
+    test.assert_true(wide > 0, "every draw fitted 32 bits")
