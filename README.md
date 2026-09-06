@@ -51,17 +51,11 @@ failure can be replayed.
 Both sources answer the same four questions, so switching between them
 changes the construction and nothing else.
 
-| Function | |
-|---|---|
-| `rng.os_open() -> ?OsRandom` | a handle held across many draws |
-| `o.u64() -> ?Int` / `o.range(lo, hi) -> ?Int` | one draw |
-| `o.fill(dst: Cursor, n) -> Bool` / `o.bytes(n) -> ?Bytes` | `n` bytes |
-| `o.close()` | give the device back |
-| `rng.os_bytes(n) -> ?Bytes` / `rng.os_u64() -> ?Int` | one-shot: open, read, close |
-| `rng.seeded(seed: Int) -> Rng` | a stream fixed by `seed` |
-| `rng.from_os() -> ?Rng` | a stream seeded from the operating system |
-| `r.u64() -> Int` / `r.range(lo, hi) -> Int` | one draw |
-| `r.fill(dst: Cursor, n)` / `r.bytes(n) -> Bytes` | `n` bytes |
+The API is on [the package's page](https://novo-lang.org/packages/rand-nv),
+generated from these sources: every `pub` declaration with its signature,
+its effect row and the comment block written above it. A table of names
+here would be a second original, and the second original is the one that
+goes stale.
 
 `u64` answers the bit pattern of an unsigned 64-bit value, so half the
 draws are negative `Int`s. That is the value, not a fault; `range` and
