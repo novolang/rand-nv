@@ -20,16 +20,7 @@
 //
 // What it does.  `u64`, `range(lo, hi)`, `fill(dst, n)` and `bytes(n)`
 // on both, with the same meanings, so switching source changes the
-// construction and nothing else.
-//
-// How to use it.
-//
-//     // A token nobody can guess.
-//     let token = rng.os_bytes(32)
-//
-//     // A run that can be replayed.
-//     var r = rng.seeded(20260905)
-//     let roll = r.range(1, 7)
+// construction and nothing else.  Each carries a worked example below.
 //
 // What it costs.  `Rng` is five xors, two shifts, two rotates and two
 // multiplies per 64-bit draw, with no allocation and no syscall; a
@@ -60,21 +51,51 @@ fn word_bytes() -> Int
 
 // ── The operating system's generator ─────────────────────────────────
 
-// An open handle on the operating system's CSPRNG.  Holding one turns a
-// draw into a single `read`; the one-shot functions below open and close
-// the device per call, which is right for a token and wrong for a loop.
+// An open handle on the operating system's CSPRNG.
+//
+// Holding one turns a draw into a single `read`; the one-shot functions
+// below open and close the device per call, which is right for a token
+// drawn once and wrong for a loop.  A handle owns a file descriptor and
+// a process has a finite number of those, so `close` it — nothing here
+// closes it for you.  `os_open` is what answers one.
 pub struct OsRandom
     fd: Int
 
-// Open the operating system's generator, or `None` where there is no
-// such device — which is every target without a `/dev/urandom`.
+// Open the operating system's generator, or answer `None` where there
+// is no such device.
+//
+// `None` is every target without a `/dev/urandom`, and it is the whole
+// answer: there is deliberately no fallback to a seeded generator,
+// because a caller asking for unpredictable bytes would then get
+// predictable ones and nothing would say so.
+//
+// ```novo
+// use rng
+//
+// // Its own `main`: reading the device is beyond `[io]`.
+// fn main() [io, fs, rand]
+//     match rng.os_open()
+//         None    => println("no /dev/urandom on this target")
+//         Some(o) =>
+//             // One handle, two draws, one close.
+//             println("${bytes.len(o.bytes(16) ?? bytes.zeros(0))}")   // 16
+//             println("${(o.range(1, 7) ?? 0) >= 1}")                  // true
+//             o.close()
+// ```
 pub fn os_open() -> ?OsRandom [fs, rand]
     match fs.open_read(device_path())
         None     => None
         Some(fd) => Some(OsRandom { fd: fd })
 
 impl OsRandom
-    // `n` random bytes, or `None` if the device would not supply them.
+    // Draw `n` random bytes, or answer `None` if the device would not
+    // supply them.
+    //
+    // `n` of 0 or less is an empty buffer rather than a refusal — a
+    // caller that computed a length of zero asked for nothing and got
+    // nothing.  A short read is `None`, never a partly filled buffer:
+    // half a key is not a key, and a caller that could not tell would
+    // ship the difference.  See `os_open` for the example.
     fn bytes(self, n: Int) -> ?Bytes [fs, rand]
         if n <= 0
             Some(bytes.zeros(0))
@@ -89,8 +110,12 @@ impl OsRandom
                     else
                         None
 
-    // `n` random bytes at the cursor.  False when the device would not
-    // supply them, in which case nothing was written.
+    // Write `n` random bytes at the cursor, and answer whether it
+    // worked.
+    //
+    // `false` when the device would not supply them, and then NOTHING
+    // was written — the buffer is exactly as the caller left it, so a
+    // failed fill cannot be mistaken for a filled one.
     fn fill(self, mut dst: Cursor, n: Int) -> Bool [fs, rand]
         match self.bytes(n)
             None    => false
@@ -98,15 +123,24 @@ impl OsRandom
                 dst.put_bytes(b)
                 true
 
-    // One 64-bit draw, as the bit pattern of an unsigned value.
+    // Draw one 64-bit value, as the bit pattern of an unsigned number.
+    //
+    // Half the answers are therefore negative `Int`s, and that is the
+    // value rather than a fault.  `None` when the device stopped
+    // answering.
     fn u64(self) -> ?Int [fs, rand]
         match self.bytes(word_bytes())
             None    => None
             Some(b) => bytes.u64_be_at(b, 0)
 
-    // A value in `[lo, hi)`, uniform — no modulo bias.  `lo` when the
-    // range is empty, matching `Rng.range`; `None` when the device
-    // stopped answering.
+    // Draw a value in `[lo, hi)`, uniform — no modulo bias.
+    //
+    // `lo` when the range is empty, matching `Rng.range`, so a caller
+    // that computed an empty range gets a value rather than a panic;
+    // `None` when the device stopped answering.  A draw landing in the
+    // ragged tail above the last whole multiple of the span is
+    // discarded and another taken, which is what "uniform" costs.  See
+    // `os_open` for the example.
     fn range(self, lo: Int, hi: Int) -> ?Int [fs, rand]
         if hi <= lo
             Some(lo)
@@ -128,14 +162,32 @@ impl OsRandom
                             drawing = false
             answer
 
-    // Give the device back.  A handle that outlives its use holds a file
-    // descriptor, and a process has a finite number of those.
+    // Give the device back.
+    //
+    // A handle that outlives its use holds a file descriptor, and a
+    // process has a finite number of those.  Nothing closes it for you,
+    // and drawing after a close is a read on a closed descriptor —
+    // which answers `None` rather than crashing, but is a bug either
+    // way.
     fn close(self) [fs]
         fs.close(self.fd)
 
-// `n` random bytes from the operating system, opening and closing the
-// device around the read.  The form for a token or a salt drawn once; a
-// caller drawing repeatedly should hold an `OsRandom`.
+// Draw `n` random bytes from the operating system, opening and closing
+// the device around the read.
+//
+// The form for a token, a salt or a nonce drawn once.  A caller drawing
+// repeatedly should hold an `OsRandom` instead: this opens and closes
+// the device every call, which is a syscall pair per draw.
+//
+// ```novo
+// use rng
+//
+// // Its own `main`: reading the device is beyond `[io]`.
+// fn main() [io, fs, rand]
+//     match rng.os_bytes(32)
+//         Some(token) => println("${bytes.len(token)}")   // 32
+//         None        => println("no /dev/urandom on this target")
+// ```
 pub fn os_bytes(n: Int) -> ?Bytes [fs, rand]
     match os_open()
         None    => None
@@ -144,8 +196,13 @@ pub fn os_bytes(n: Int) -> ?Bytes [fs, rand]
             o.close()
             drawn
 
-// One 64-bit draw from the operating system, opening and closing the
-// device around the read.
+// Draw one 64-bit value from the operating system, opening and closing
+// the device around the read.
+//
+// `os_bytes` with the eight bytes read as a number, and the same
+// warning: hold an `OsRandom` if you are drawing more than once.  Half
+// the answers are negative `Int`s, because the eight bytes are a bit
+// pattern and not a magnitude.
 pub fn os_u64() -> ?Int [fs, rand]
     match os_bytes(word_bytes())
         None    => None
@@ -153,20 +210,38 @@ pub fn os_u64() -> ?Int [fs, rand]
 
 // ── The reproducible generator ───────────────────────────────────────
 
-// xoshiro256**, whose whole state is these four words.  Not
-// cryptographically secure: an observer who has seen a few outputs can
-// compute the rest.  Seed it from a constant to replay a run, or from
-// `from_os` when the stream should differ per process but need not be
-// unguessable.
+// xoshiro256**, whose whole state is these four words.
+//
+// NOT cryptographically secure: an observer who has seen a few outputs
+// can compute the rest, so nothing that anyone gains by predicting
+// should come from one.  Seed it from a constant to replay a run, or
+// from `from_os` when the stream should differ per process but need not
+// be unguessable.  `seeded` and `from_os` are what answer one; the
+// methods are `u64`, `positive`, `range`, `fill` and `bytes`.
 pub struct Rng
     var s0: Int
     var s1: Int
     var s2: Int
     var s3: Int
 
-// A generator whose stream is fixed by `seed`.  The same seed gives the
-// same numbers on every machine and every backend, which is the whole
-// point of having this beside the operating system's generator.
+// Build a generator whose stream is fixed by `seed`.
+//
+// The same seed gives the same numbers on every machine and every
+// backend, which is the whole point of having this beside the operating
+// system's generator: a failing test that shuffled its fixture can be
+// run again and fail the same way.  It cannot fail and reads nothing —
+// no effects, so it runs on any tier and inside a pure caller.
+//
+// ```novo
+// // Same seed, same stream — and that is a promise, not an accident.
+// var a = rng.seeded(20260905)
+// var b = rng.seeded(20260905)
+// println("${a.u64() == b.u64()}")           // true
+//
+// // Neighbouring seeds do not give neighbouring streams: the seed is
+// // spread across the state by splitmix64 first.
+// println("${rng.seeded(1).u64() != rng.seeded(2).u64()}")   // true
+// ```
 pub fn seeded(seed: Int) -> Rng
     // splitmix64, the seeding routine xoshiro's authors specify.  It is
     // here rather than "put the seed in s0" because the state must not
@@ -180,18 +255,46 @@ pub fn seeded(seed: Int) -> Rng
     Rng { s0: split_value(a), s1: split_value(b),
           s2: split_value(c), s3: split_value(d) }
 
-// A generator seeded from the operating system, so its stream differs
-// per process.  Still not cryptographically secure — the seed is
-// unguessable and the stream that follows is not.
+// Build a generator seeded from the operating system, so its stream
+// differs per process.
+//
+// Still not cryptographically secure — the seed is unguessable and the
+// stream that follows is not, so this is for a run that should vary
+// rather than for anything an observer must not predict.  `None` where
+// there is no `/dev/urandom`.
+//
+// ```novo
+// use rng
+//
+// // Its own `main`: seeding from the device is beyond `[io]`.
+// fn main() [io, fs, rand]
+//     match rng.from_os()
+//         None    => println("no /dev/urandom on this target")
+//         Some(r) =>
+//             var g = r
+//             println("${g.range(1, 7) >= 1}")   // true
+// ```
 pub fn from_os() -> ?Rng [fs, rand]
     match os_u64()
         None    => None
         Some(v) => Some(seeded(v))
 
 impl Rng
-    // The next 64-bit draw, as the bit pattern of an unsigned value —
-    // so half the outputs are negative `Int`s, and that is the value
-    // rather than a fault.
+    // Draw the next 64-bit value, as the bit pattern of an unsigned
+    // number.
+    //
+    // Half the answers are negative `Int`s, and that is the value
+    // rather than a fault: the draw is 64 bits and an `Int` is 64 bits,
+    // so there is nowhere for a sign to go.  `positive` is the same
+    // draw with the top bit dropped, and is what everything that counts
+    // or indexes should use.
+    //
+    // ```novo
+    // // The stream is fixed by the seed, so these are exact values.
+    // var r = rng.seeded(1)
+    // println("${r.u64()}")   // -5480124913605472059
+    // println("${r.u64()}")   // -8846382939111011094
+    // ```
     fn u64(mut self) -> Int
         // The "**" of xoshiro256**: the output is a scrambled view of
         // one state word, and the state advances independently, so a
@@ -206,16 +309,39 @@ impl Rng
         self.s3 = rotl(self.s3, 45)
         result
 
-    // A non-negative draw, the top bit dropped.  Everything that counts
-    // or indexes goes through this, so the arithmetic below is ordinary
-    // arithmetic on a signed `Int` rather than unsigned arithmetic
-    // wearing one.
+    // Draw a non-negative value: the next 64-bit draw with its top bit
+    // dropped, so 63 random bits.
+    //
+    // Everything that counts or indexes goes through this, so the
+    // arithmetic above it is ordinary arithmetic on a signed `Int`
+    // rather than unsigned arithmetic wearing one.  It consumes one
+    // draw, like `u64`.
+    //
+    // ```novo
+    // var r = rng.seeded(42)
+    // println("${r.positive() >= 0}")   // true
+    // ```
     fn positive(mut self) -> Int
         positive_of(self.u64())
 
-    // A value in `[lo, hi)`, uniform.  `lo` when the range is empty, so
-    // a caller that computed an empty range gets a value rather than a
-    // panic; `hi - lo` must fit an `Int`.
+    // Draw a value in `[lo, hi)`, uniform.
+    //
+    // `lo` when the range is empty, so a caller that computed an empty
+    // range gets a value rather than a panic; `hi - lo` must fit an
+    // `Int`.  Uniform means uniform: a draw landing in the ragged tail
+    // above the last whole multiple of the span is discarded and
+    // another taken, rather than folded with `%` — which would favour
+    // the low values, invisibly for a die and totally for a span near
+    // the top of the range.  It therefore consumes one draw or more.
+    //
+    // ```novo
+    // // A die, replayable: the same seed rolls the same numbers.
+    // var r = rng.seeded(20260905)
+    // println("${r.range(1, 7)} ${r.range(1, 7)} ${r.range(1, 7)}")   // 2 3 2
+    //
+    // // An empty range is its own low end, not a panic.
+    // println("${r.range(5, 5)}")   // 5
+    // ```
     fn range(mut self, lo: Int, hi: Int) -> Int
         if hi <= lo
             lo
@@ -229,8 +355,24 @@ impl Rng
                 d = self.positive()
             lo + d % span
 
-    // `n` random bytes at the cursor.  Writes into the caller's buffer
-    // and allocates nothing.
+    // Write `n` random bytes at the cursor.  Writes into the caller's
+    // buffer and allocates nothing.
+    //
+    // One draw per eight bytes, plus one for a tail shorter than that;
+    // the unused part of the tail draw is discarded rather than carried,
+    // so a fill never depends on how the previous one ended.  That is
+    // what makes two fills of 4 and 4 differ from one fill of 8 — the
+    // stream position is what repeats, not the bytes.
+    //
+    // ```novo
+    // use std.bytes
+    //
+    // var r = rng.seeded(1)
+    // var out = bytes.cursor_be(bytes.zeros(12))
+    // r.fill(out, 12)
+    // println(bytes.to_hex(out.finish()))
+    // // b3f2af6d0fc710c5ea4c3647
+    // ```
     fn fill(mut self, mut dst: Cursor, n: Int)
         var remaining = n
         while remaining >= word_bytes()
@@ -245,7 +387,17 @@ impl Rng
                 dst.put_u8(word & 0xff)
                 word >>>= 8
 
-    // `n` random bytes as a fresh buffer.
+    // Draw `n` random bytes as a fresh buffer.
+    //
+    // `fill` with the buffer allocated for you, for a caller building a
+    // fixture rather than filling a frame.
+    //
+    // ```novo
+    // use std.bytes
+    //
+    // var r = rng.seeded(7)
+    // println("${bytes.len(r.bytes(5))}")   // 5
+    // ```
     fn bytes(mut self, n: Int) -> Bytes
         var c = bytes.cursor_be(bytes.zeros(n))
         self.fill(c, n)

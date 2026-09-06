@@ -1,6 +1,6 @@
 [package]
 name        = "rand-nv"
-version     = "0.1.2"
+version     = "0.1.3"
 description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
 license     = "Apache-2.0"
 stability   = "experimental"

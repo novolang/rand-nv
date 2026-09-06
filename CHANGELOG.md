@@ -4,6 +4,25 @@ Newest first.  Below `1.0.0` a breaking change bumps the **minor**
 number and a compatible one the **patch**; see [Version numbers in the
 Orbit package registry](https://novo-lang.org/docs/registry/semver.html).
 
+## 0.1.3
+
+Documentation: the reference is generated from the code, and the
+examples in it are doctests.  No code changed — the seeded stream is
+the same stream 0.1.2 produced, which the examples now pin.
+
+- **Every `pub` item is documented under Go's rule**, the comment block
+  directly above the declaration, its first sentence the summary a
+  reader meets before opening anything.  The methods on `OsRandom` and
+  `Rng` carry their own.  `novo doc` turns the lot into
+  [the package's page](https://novo-lang.org/packages/rand-nv).
+- **Nine worked examples, and they run.**  The seeded generator's
+  examples print exact values — the first two draws from `seeded(1)`,
+  three dice rolls, twelve bytes in hex — so the promise that a seed
+  fixes a stream is now checked on every run rather than asserted.  The
+  three that read `/dev/urandom` write their own `main`, since drawing
+  needs more than `[io]`.  A fenced `novo` block in a documentation
+  comment is compiled by `novo doc` and run by `novo test src/rng.nv`.
+
 ## 0.1.2
 
 Developed in its own repository from this version.  `novolang/rand-nv` is
