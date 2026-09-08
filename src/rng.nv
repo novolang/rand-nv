@@ -383,7 +383,7 @@ impl Rng
         // depends on how the previous one ended.
         if remaining > 0
             var word = self.u64()
-            for _i in 0 .. remaining
+            for _i in 0..remaining
                 dst.put_u8(word & 0xff)
                 word >>>= 8
 

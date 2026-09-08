@@ -26,7 +26,7 @@ use rng
 fn stream(seed: Int, n: Int) -> [Int]
     var r = rng.seeded(seed)
     var out: [Int] = []
-    for _i in 0 .. n
+    for _i in 0..n
         let draw = r.u64()
         out = list.push(out, draw)
     out
@@ -60,7 +60,7 @@ fn test_the_same_seed_replays_exactly() [io]
     // The property the whole seedable half exists for.
     let a = stream(20260905, 64)
     let b = stream(20260905, 64)
-    for i in 0 .. 64
+    for i in 0..64
         test.case("draw ${i}")
         test.assert_eq(a[i], b[i])
 
@@ -71,7 +71,7 @@ fn test_neighbouring_seeds_produce_unrelated_streams() [io]
     let a = stream(1, 32)
     let b = stream(2, 32)
     var same = 0
-    for i in 0 .. 32
+    for i in 0..32
         if a[i] == b[i]
             same = same + 1
     test.assert_eq(same, 0)
@@ -84,14 +84,14 @@ fn test_every_bit_of_the_output_moves() [io]
     var r = rng.seeded(7)
     var ones = bytes.zeros(64)
     var zeros = bytes.zeros(64)
-    for _d in 0 .. 200
+    for _d in 0..200
         let v = r.u64()
-        for b in 0 .. 64
+        for b in 0..64
             if ((v >>> b) & 1) == 1
                 ones = bytes.set_u8(ones, b, 1)
             else
                 zeros = bytes.set_u8(zeros, b, 1)
-    for b in 0 .. 64
+    for b in 0..64
         test.case("bit ${b}")
         test.assert_eq(bytes.byte_at(ones, b) ?? 0, 1)
         test.assert_eq(bytes.byte_at(zeros, b) ?? 0, 1)
@@ -99,7 +99,7 @@ fn test_every_bit_of_the_output_moves() [io]
 @test
 fn test_range_stays_inside_its_bounds() [io]
     var r = rng.seeded(11)
-    for _i in 0 .. 500
+    for _i in 0..500
         let v = r.range(10, 20)
         test.assert_true(v >= 10, "range went below its low bound")
         test.assert_true(v < 20, "range reached its high bound")
@@ -109,9 +109,9 @@ fn test_range_reaches_every_value_it_should() [io]
     // A die that never rolls a six is a bug a bounds check would miss.
     var r = rng.seeded(13)
     var seen = bytes.zeros(6)
-    for _i in 0 .. 400
+    for _i in 0..400
         seen = bytes.set_u8(seen, r.range(0, 6), 1)
-    for face in 0 .. 6
+    for face in 0..6
         test.case("face ${face}")
         test.assert_eq(bytes.byte_at(seen, face) ?? 0, 1)
 
@@ -126,13 +126,13 @@ fn test_an_empty_or_reversed_range_answers_its_low_bound() [io]
 @test
 fn test_a_span_of_one_is_a_constant() [io]
     var r = rng.seeded(19)
-    for _i in 0 .. 20
+    for _i in 0..20
         test.assert_eq(r.range(3, 4), 3)
 
 @test
 fn test_fill_writes_exactly_what_it_was_asked_for() [io]
     // Including the tail that is not a whole 8-byte draw.
-    for n in 0 .. 40
+    for n in 0..40
         test.case("length ${n}")
         var r = rng.seeded(23)
         var c = bytes.cursor_be(bytes.zeros(n + 4))
@@ -140,7 +140,7 @@ fn test_fill_writes_exactly_what_it_was_asked_for() [io]
         test.assert_eq(c.pos(), n)
         // The four bytes past the end must be untouched.
         let buf = c.finish()
-        for extra in n .. n + 4
+        for extra in n..n + 4
             test.assert_eq(bytes.byte_at(buf, extra) ?? 1, 0)
 
 @test
@@ -192,7 +192,7 @@ fn test_the_operating_system_range_stays_inside_its_bounds() [io, fs, rand]
     match rng.os_open()
         None    => test.fail("the operating system's generator would not open")
         Some(o) =>
-            for _i in 0 .. 50
+            for _i in 0..50
                 match o.range(100, 110)
                     None    => test.fail("a draw from the device failed")
                     Some(v) =>
@@ -208,7 +208,7 @@ fn test_seeding_from_the_operating_system_gives_a_working_generator() [io, fs, r
             var g = r
             var distinct = 0
             let first = g.u64()
-            for _i in 0 .. 8
+            for _i in 0..8
                 if g.u64() != first
                     distinct = distinct + 1
             test.assert_eq(distinct, 8)
@@ -218,7 +218,7 @@ fn test_os_u64_answers_a_full_width_value() [io, fs, rand]
     // Sixteen draws that all landed in the low 32 bits would mean the
     // read was short and the top half left as zero.
     var wide = 0
-    for _i in 0 .. 16
+    for _i in 0..16
         match rng.os_u64()
             None    => test.fail("a draw from the device failed")
             Some(v) =>
