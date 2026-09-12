@@ -4,6 +4,10 @@ Newest first.  Below `1.0.0` a breaking change bumps the **minor**
 number and a compatible one the **patch**; see [Version numbers in the
 Orbit package registry](https://novo-lang.org/docs/registry/semver.html).
 
+## 0.1.5 — 2026-09-12
+
+### Changed — The README is rewritten in plain technical-writer prose; no signature changed.
+
 ## 0.1.4 — 2026-09-08
 
 - **Declares its layer**: `layer = "host"` in the manifest — the public API reaches the host for its random bytes (`[fs, rand]`), and `novo pkg publish` now checks the code against that budget.  No code changed.  The layers are described under Design in the [publishing guide](https://novo-lang.org/docs/publishing.html#design).
