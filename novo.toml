@@ -1,6 +1,6 @@
 [package]
 name        = "rand-nv"
-version     = "0.1.5"
+version     = "0.1.6"
 description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
 license     = "Apache-2.0"
 stability   = "experimental"
@@ -11,12 +11,13 @@ repository  = "https://github.com/novolang/rand-nv"
 maintainers = ["novo-lang"]
 main        = "src/main.nv"
 
-# The README is the package's one page, and its own first heading is the
-# package name — which says nothing in a list of this package's pages.
+# The README is the package's one page.  Its own first heading is the
+# package name, which says nothing in a list of this package's pages, so
+# the line below is what a reader sees there instead.
 [docs.pages]
 "README.md" = "Drawing random numbers, securely or reproducibly"
 
 [dependencies]
-# None.  std.fs opens the operating system's device, std.int supplies
-# the wrapping multiply, std.bytes the buffer and the cursor; the shifts
-# and xors are operators.
+# None.  `std.fs` opens the operating system's device, `std.int`
+# supplies the wrapping multiply, and `std.bytes` supplies the buffer
+# and the cursor.  The shifts and the exclusive-ors are operators.

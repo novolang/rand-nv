@@ -1,28 +1,29 @@
 // rng_tests.nv — the seeding vector, the properties a generator has to
-// have, and the operating system source actually answering.
+// have, and the operating system source answering.
 //
-// Run from the package directory:
+// Run it from the package directory.
+//
 //   novo test tests/rng_tests.nv
 //
 // A generator cannot be tested by asserting that its numbers look
-// random — that is what a test suite is worst at.  What is asserted
-// here is what a caller relies on: the same seed replays exactly, two
-// seeds do not, `range` never leaves its bounds and covers them, `fill`
-// writes what it was asked for, and the operating system's device is
-// there and gives different bytes each time.
+// random.  What is asserted here is what a caller relies on.  The same
+// seed replays exactly and two neighbouring seeds do not.  `range`
+// never leaves its bounds and reaches every value inside them.  `fill`
+// writes what it was asked for and nothing past it.  The operating
+// system's device is there and answers different bytes each time.
 //
-// The one external vector is splitmix64's first output for seed 0,
-// which is what pins the seeding routine to the one xoshiro's authors
-// specify rather than to this file's idea of it.
+// The one external vector is splitmix64's first output for seed 0.  It
+// pins the seeding routine to the one xoshiro's authors specify rather
+// than to this file's idea of it.
 
 use std.bytes
 use std.list
 use std.test
 use rng
 
-// The first `n` draws of a generator seeded with `seed`.  A loop rather
-// than a `list.map` because each element comes from advancing the
-// generator, so the order of the calls is the meaning.
+// The first `n` draws of a generator seeded with `seed`.  It is a loop
+// rather than a `list.map` because each element comes from advancing
+// the generator, so the order of the calls is the meaning.
 fn stream(seed: Int, n: Int) -> [Int]
     var r = rng.seeded(seed)
     var out: [Int] = []
@@ -34,18 +35,18 @@ fn stream(seed: Int, n: Int) -> [Int]
 @test
 fn test_the_splitmix64_seeding_vector() [io]
     // splitmix64 from state 0 produces 0xe220a8397b1dcdaf first, and
-    // that value is what `seeded(0)` puts in `s0`.  It is the published
-    // number for the routine, so it pins the seeding to the standard
-    // one rather than to this implementation.
+    // that value is what `seeded(0)` puts in `s0`.  It is the number
+    // the routine publishes, so it pins the seeding to the standard
+    // routine rather than to this package's copy of it.
     let expected = 0 - 2152535657050944081
     test.assert_eq(rng.seeded(0).s0, expected)
     test.assert_eq_str(bytes.to_hex(bytes.u64_be(expected)), "e220a8397b1dcdaf")
 
 @test
 fn test_the_seed_spreads_across_the_whole_state() [io]
-    // The reason `seeded` runs splitmix64 rather than storing the seed:
-    // no state word may be left empty or equal to another, or the
-    // generator opens with a visibly poor stream.
+    // This is why `seeded` runs splitmix64 rather than storing the
+    // seed.  No state word may be left empty or equal to another, or
+    // the generator opens with a visibly poor stream.
     let r = rng.seeded(0)
     test.assert_ne(r.s0, 0)
     test.assert_ne(r.s1, 0)
@@ -57,7 +58,7 @@ fn test_the_seed_spreads_across_the_whole_state() [io]
 
 @test
 fn test_the_same_seed_replays_exactly() [io]
-    // The property the whole seedable half exists for.
+    // The property the seedable source exists for.
     let a = stream(20260905, 64)
     let b = stream(20260905, 64)
     for i in 0..64
@@ -67,7 +68,7 @@ fn test_the_same_seed_replays_exactly() [io]
 @test
 fn test_neighbouring_seeds_produce_unrelated_streams() [io]
     // Seeds that differ by one must not produce streams that differ by
-    // one — that is exactly what a state seeded without splitmix64 does.
+    // one.  A state seeded without splitmix64 does exactly that.
     let a = stream(1, 32)
     let b = stream(2, 32)
     var same = 0
@@ -80,7 +81,7 @@ fn test_neighbouring_seeds_produce_unrelated_streams() [io]
 fn test_every_bit_of_the_output_moves() [io]
     // Over enough draws each of the 64 output bits must have been seen
     // both set and clear.  A generator whose high bits never move looks
-    // fine until someone shifts right.
+    // correct until a caller shifts right.
     var r = rng.seeded(7)
     var ones = bytes.zeros(64)
     var zeros = bytes.zeros(64)
