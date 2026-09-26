@@ -123,7 +123,7 @@ impl OsRandom
     // The answer is `false` when the device would not supply them, and
     // then nothing was written.  The buffer is exactly as the caller
     // left it, so a failed fill cannot be mistaken for a filled one.
-    fn fill(self, mut dst: Cursor, n: Int) -> Bool [fs, rand]
+    fn fill(self, var dst: Cursor, n: Int) -> Bool [fs, rand]
         let Some(b) = self.bytes(n) else return false
         dst.put_bytes(b)
         true
@@ -303,7 +303,7 @@ impl Rng
     // println("${r.u64()}")   // -5480124913605472059
     // println("${r.u64()}")   // -8846382939111011094
     // ```
-    fn u64(mut self) -> Int
+    fn u64(var self) -> Int
         // The two stars of xoshiro256** name the scrambler.  The output
         // is a scrambled view of one state word, and the state advances
         // on its own, so a weakness in either does not reach the other.
@@ -329,7 +329,7 @@ impl Rng
     // var r = rng.seeded(42)
     // println("${r.positive() >= 0}")   // true
     // ```
-    fn positive(mut self) -> Int
+    fn positive(var self) -> Int
         positive_of(self.u64())
 
     // Draw a value in `[lo, hi)`, uniformly.
@@ -352,7 +352,7 @@ impl Rng
     // // An empty range is its own low end, not a panic.
     // println("${r.range(5, 5)}")   // 5
     // ```
-    fn range(mut self, lo: Int, hi: Int) -> Int
+    fn range(var self, lo: Int, hi: Int) -> Int
         if hi <= lo
             lo
         else
@@ -384,7 +384,7 @@ impl Rng
     // println(bytes.to_hex(out.finish()))
     // // b3f2af6d0fc710c5ea4c3647
     // ```
-    fn fill(mut self, mut dst: Cursor, n: Int)
+    fn fill(var self, var dst: Cursor, n: Int)
         var remaining = n
         while remaining >= word_bytes()
             dst.put_u64(self.u64())
@@ -409,7 +409,7 @@ impl Rng
     // var r = rng.seeded(7)
     // println("${bytes.len(r.bytes(5))}")   // 5
     // ```
-    fn bytes(mut self, n: Int) -> Bytes
+    fn bytes(var self, n: Int) -> Bytes
         var c = bytes.cursor_be(bytes.zeros(n))
         self.fill(c, n)
         c.finish()
