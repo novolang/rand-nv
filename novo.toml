@@ -1,6 +1,6 @@
 [package]
 name        = "rand-nv"
-version     = "0.1.6"
+version     = "0.1.7"
 description = "Random numbers from two sources kept apart on purpose: the operating system's CSPRNG for anything an attacker would gain by predicting, and a seedable xoshiro256** for anything that has to produce the same numbers twice.  The operating-system half is host-only."
 license     = "Apache-2.0"
 stability   = "experimental"
@@ -9,6 +9,10 @@ layer       = "host"
 tags        = ["random", "csprng", "xoshiro", "urandom", "seed"]
 repository  = "https://github.com/novolang/rand-nv"
 maintainers = ["novo-lang"]
+# `!` on an optional hands `None` back from a function that answers an
+# optional from toolchain 0.12.0.  An older toolchain panics there
+# instead, so the floor is 0.12.0.
+novo        = ">= 0.12.0"
 main        = "src/main.nv"
 
 # The README is the package's one page.  Its own first heading is the

@@ -111,13 +111,11 @@ impl OsRandom
         else
             // The offset is ignored by a character device, which is
             // what `/dev/urandom` is.  Every read draws fresh bytes.
-            match fs.read_at(self.fd, 0, n)
-                None     => None
-                Some(bs) =>
-                    if list.len(bs) == n
-                        Some(bytes.from_byte_list(bs))
-                    else
-                        None
+            let bs = fs.read_at(self.fd, 0, n)!
+            if list.len(bs) == n
+                Some(bytes.from_byte_list(bs))
+            else
+                None
 
     // Write `n` random bytes at the cursor, and answer whether it
     // worked.
@@ -126,11 +124,9 @@ impl OsRandom
     // then nothing was written.  The buffer is exactly as the caller
     // left it, so a failed fill cannot be mistaken for a filled one.
     fn fill(self, mut dst: Cursor, n: Int) -> Bool [fs, rand]
-        match self.bytes(n)
-            None    => false
-            Some(b) =>
-                dst.put_bytes(b)
-                true
+        let Some(b) = self.bytes(n) else return false
+        dst.put_bytes(b)
+        true
 
     // Draw one 64-bit value, as the bit pattern of an unsigned number.
     //
@@ -200,12 +196,10 @@ impl OsRandom
 //         None        => println("no /dev/urandom on this target")
 // ```
 pub fn os_bytes(n: Int) -> ?Bytes [fs, rand]
-    match os_open()
-        None    => None
-        Some(o) =>
-            let drawn = o.bytes(n)
-            o.close()
-            drawn
+    let o = os_open()!
+    let drawn = o.bytes(n)
+    o.close()
+    drawn
 
 // Draw one 64-bit value from the operating system, opening and closing
 // the device around the read.
